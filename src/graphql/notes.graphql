@@ -1,0 +1,71 @@
+query Me {
+  me {
+    id
+    username
+  }
+}
+
+query Notes($input: PageInput, $filter: FilterInput) {
+  notes(input: $input, filter: $filter) {
+    items {
+      id
+      title
+      content
+      createdAt
+      updatedAt
+    }
+    pageInfo {
+      startCursor
+      endCursor
+      hasNextPage
+      hasPreviousPage
+    }
+  }
+}
+
+mutation Login($username: String!) {
+  login(username: $username) {
+    code
+    success
+    message
+    accessToken
+  }
+}
+
+mutation CreateNote($input: CreateNoteInput!) {
+  createNote(input: $input) {
+    code
+    success
+    message
+    note {
+      id
+      title
+      content
+      createdAt
+      updatedAt
+    }
+  }
+}
+
+mutation UpdateNote($id: ID!, $input: UpdateNoteInput!) {
+  updateNote(id: $id, input: $input) {
+    code
+    success
+    message
+    note {
+      id
+      title
+      content
+      createdAt
+      updatedAt
+    }
+  }
+}
+
+mutation DeleteNote($id: ID!) {
+  deleteNote(id: $id) {
+    code
+    success
+    message
+  }
+}
