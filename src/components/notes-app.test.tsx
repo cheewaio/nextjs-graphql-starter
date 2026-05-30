@@ -72,7 +72,7 @@ describe("notes ui", () => {
           {
             request: {
               query: NotesDocument,
-              variables: { input: { first: 5 } },
+              variables: { input: { pageSize: 5 } },
             },
             result: {
               data: {
@@ -86,11 +86,10 @@ describe("notes ui", () => {
                       updatedAt: "2024-01-01T00:00:00.000Z",
                     },
                   ],
-                  pageInfo: {
-                    startCursor: "Y3Vyc29yLTE",
-                    endCursor: "Y3Vyc29yLTE",
-                    hasNextPage: true,
-                    hasPreviousPage: false,
+                  pagination: {
+                    next: { cursor: "Y3Vyc29yLTE", pageSize: 5, __typename: "CursorPage" },
+                    previous: null,
+                    total: 2,
                   },
                 },
               },
@@ -99,7 +98,7 @@ describe("notes ui", () => {
           {
             request: {
               query: NotesDocument,
-              variables: { input: { first: 5, after: "Y3Vyc29yLTE" }, filter: null },
+              variables: { input: { pageSize: 5, cursor: "Y3Vyc29yLTE" } },
             },
             result: {
               data: {
@@ -113,11 +112,10 @@ describe("notes ui", () => {
                       updatedAt: "2024-01-02T00:00:00.000Z",
                     },
                   ],
-                  pageInfo: {
-                    startCursor: "Y3Vyc29yLTI",
-                    endCursor: "Y3Vyc29yLTI",
-                    hasNextPage: false,
-                    hasPreviousPage: true,
+                  pagination: {
+                    next: null,
+                    previous: { cursor: "Y3Vyc29yLTI", pageSize: 5, __typename: "CursorPage" },
+                    total: 2,
                   },
                 },
               },
@@ -148,7 +146,7 @@ describe("notes ui", () => {
           {
             request: {
               query: NotesDocument,
-              variables: { input: { first: 5 } },
+              variables: { input: { pageSize: 5 } },
             },
             result: {
               data: {
@@ -162,11 +160,10 @@ describe("notes ui", () => {
                       updatedAt: "2024-01-03T00:00:00.000Z",
                     },
                   ],
-                  pageInfo: {
-                    startCursor: "Y3Vyc29yLTM",
-                    endCursor: "Y3Vyc29yLTM",
-                    hasNextPage: false,
-                    hasPreviousPage: false,
+                  pagination: {
+                    next: null,
+                    previous: null,
+                    total: 1,
                   },
                 },
               },
@@ -200,7 +197,7 @@ describe("notes ui", () => {
           {
             request: {
               query: NotesDocument,
-              variables: { input: { first: 5 } },
+              variables: { input: { pageSize: 5 } },
             },
             result: {
               data: {
@@ -214,11 +211,10 @@ describe("notes ui", () => {
                       updatedAt: "2024-01-04T00:00:00.000Z",
                     },
                   ],
-                  pageInfo: {
-                    startCursor: "Y3Vyc29yLTM",
-                    endCursor: "Y3Vyc29yLTM",
-                    hasNextPage: false,
-                    hasPreviousPage: false,
+                  pagination: {
+                    next: null,
+                    previous: null,
+                    total: 1,
                   },
                 },
               },
@@ -242,17 +238,16 @@ describe("notes ui", () => {
           {
             request: {
               query: NotesDocument,
-              variables: { input: { first: 5 } },
+              variables: { input: { pageSize: 5 } },
             },
             result: {
               data: {
                 notes: {
                   items: [],
-                  pageInfo: {
-                    startCursor: null,
-                    endCursor: null,
-                    hasNextPage: false,
-                    hasPreviousPage: false,
+                  pagination: {
+                    next: null,
+                    previous: null,
+                    total: 0,
                   },
                 },
               },

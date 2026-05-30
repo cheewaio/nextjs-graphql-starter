@@ -4,13 +4,12 @@ import { requireUser, requireUserOrGraphQLError, type GraphQLContext } from "@/g
 import { mutationFailure, mutationSuccess } from "@/graphql/support/mutation-response";
 import {
   type FilterOperator,
-  parseFilterInput,
-  parsePageInput,
+  parsePaginationInput,
 } from "@/graphql/support/query-input";
 import { isAppError } from "@/lib/errors";
 import { NoteService } from "@/services/note-service";
 
-const supportedFields: Record<string, FilterOperator[]> = {
+const supportedFilterFields: Record<string, FilterOperator[]> = {
   id: ["EQ", "NEQ"],
   title: ["EQ", "NEQ", "CONTAINS"],
   content: ["EQ", "NEQ", "CONTAINS"],
@@ -58,28 +57,29 @@ export const noteResolvers = {
       _parent: unknown,
       args: {
         input?: {
-          first?: number | null;
-          after?: string | null;
-          last?: number | null;
-          before?: string | null;
-          sort?: { field: string; asc: boolean }[] | null;
-        } | null;
-        filter?: {
-          filters?: {
-            field: string;
-            operator:
-              | "EQ"
-              | "NEQ"
-              | "CONTAINS"
-              | "GT"
-              | "GTE"
-              | "LT"
-              | "LTE"
-              | "IS_NULL"
-              | "IS_NOT_NULL";
-            value?: string | null;
-          }[] | null;
-          logic?: "AND" | "OR" | null;
+          mode?: "CURSOR" | "OFFSET" | null;
+          pageSize?: number | null;
+          pageNumber?: number | null;
+          cursor?: string | null;
+          search?: { query: string; fields?: string[] | null } | null;
+          sort?: { field: string; order?: "ASC" | "DESC" | null }[] | null;
+          filter?: {
+            filters?: {
+              field: string;
+              operator:
+                | "EQ"
+                | "NEQ"
+                | "CONTAINS"
+                | "GT"
+                | "GTE"
+                | "LT"
+                | "LTE"
+                | "IS_NULL"
+                | "IS_NOT_NULL";
+              value?: string | null;
+            }[] | null;
+            logic?: "AND" | "OR" | null;
+          } | null;
         } | null;
       },
       context: GraphQLContext
@@ -89,8 +89,7 @@ export const noteResolvers = {
       try {
         return await noteService.list(
           user.username,
-          parsePageInput(args.input, supportedSortFields),
-          parseFilterInput(args.filter, supportedFields)
+          parsePaginationInput(args.input, supportedSortFields, supportedFilterFields)
         );
       } catch (error) {
         throw toQueryError(error);

@@ -25,30 +25,46 @@ export type FilterInput = {
   logic?: FilterLogic | null;
 };
 
+export type SortOrder = "ASC" | "DESC";
+
 export type SortFieldInput = {
   field: string;
-  asc: boolean;
+  order?: SortOrder | null;
 };
 
-export type PageInput = {
-  first?: number | null;
-  after?: string | null;
-  last?: number | null;
-  before?: string | null;
+export type SearchInput = {
+  query: string;
+  fields?: string[] | null;
+};
+
+export type PaginationInput = {
+  mode?: "CURSOR" | "OFFSET" | null;
+  pageSize?: number | null;
+  pageNumber?: number | null;
+  cursor?: string | null;
+  search?: SearchInput | null;
   sort?: SortFieldInput[] | null;
+  filter?: FilterInput | null;
 };
 
 export type ParsedSortField = {
   field: string;
-  asc: boolean;
+  order: SortOrder;
 };
 
-export type ParsedPageInput = {
-  first: number;
-  last: number;
+export type ParsedSearchInput = {
+  query: string;
+  fields: string[];
+};
+
+export type ParsedPaginationInput = {
+  mode: "CURSOR" | "OFFSET";
+  pageSize: number;
+  pageNumber: number;
   after: CursorPayload | null;
-  before: CursorPayload | null;
   sort: ParsedSortField[];
+  search: ParsedSearchInput | null;
+  filter: ParsedFilterInput;
 };
 
 export type ParsedFilter = {
@@ -62,14 +78,14 @@ export type ParsedFilterInput = {
   logic: FilterLogic;
 };
 
-const defaultPageSize = 10;
-const maxPageSize = 50;
+const defaultPageSize = 20;
+const maxPageSize = 100;
 
 function clamp(value: number) {
   return Math.min(Math.max(value, 1), maxPageSize);
 }
 
-function decodePageCursor(cursor: string, label: "after" | "before") {
+function decodePageCursor(cursor: string, label: string) {
   try {
     return decodeCursor(cursor);
   } catch {
@@ -81,86 +97,46 @@ function decodePageCursor(cursor: string, label: "after" | "before") {
   }
 }
 
-export function parsePageInput(
-  input?: PageInput | null,
-  supportedSortFields?: readonly string[]
-): ParsedPageInput {
-  const parsed: ParsedPageInput = {
-    first: defaultPageSize,
-    last: 0,
-    after: null,
-    before: null,
-    sort: [],
-  };
+export function parsePaginationInput(
+  input?: PaginationInput | null,
+  supportedSortFields?: readonly string[],
+  supportedFilterFields?: Record<string, FilterOperator[]>
+): ParsedPaginationInput {
+  const mode = input?.mode ?? "CURSOR";
+  const pageSize = input?.pageSize != null ? clamp(input.pageSize) : defaultPageSize;
 
-  switch (true) {
-    case Boolean(input?.before): {
-      const before = input?.before;
+  let pageNumber = 0;
+  let after: CursorPayload | null = null;
 
-      if (input?.after) {
-        throw new AppError(
-          "after and before cannot be used together",
-          400,
-          "BAD_USER_INPUT"
-        );
-      }
+  if (mode === "OFFSET") {
+    pageNumber = input?.pageNumber ?? 0;
 
-      parsed.before = decodePageCursor(before!, "before");
-
-      if (input?.last != null) {
-        parsed.last = clamp(input.last);
-      } else if (input?.first != null) {
-        throw new AppError(
-          "last must be used with before, not first",
-          400,
-          "BAD_USER_INPUT"
-        );
-      } else {
-        parsed.last = defaultPageSize;
-      }
-
-      parsed.first = 0;
-      break;
+    if (pageNumber < 0) {
+      throw new AppError("pageNumber must be non-negative.", 400, "BAD_USER_INPUT");
     }
 
-    case Boolean(input?.after): {
-      const after = input?.after;
-
-      if (input?.before) {
-        throw new AppError(
-          "after and before cannot be used together",
-          400,
-          "BAD_USER_INPUT"
-        );
-      }
-
-      parsed.after = decodePageCursor(after!, "after");
-
-      if (input?.first != null) {
-        parsed.first = clamp(input.first);
-      } else if (input?.last != null) {
-        throw new AppError(
-          "first must be used with after, not last",
-          400,
-          "BAD_USER_INPUT"
-        );
-      }
-
-      break;
+    if (input?.cursor) {
+      throw new AppError(
+        "cursor cannot be used with OFFSET mode.",
+        400,
+        "BAD_USER_INPUT"
+      );
+    }
+  } else {
+    if (input?.pageNumber != null) {
+      throw new AppError(
+        "pageNumber cannot be used with CURSOR mode.",
+        400,
+        "BAD_USER_INPUT"
+      );
     }
 
-    default: {
-      if (input?.first != null) {
-        parsed.first = clamp(input.first);
-      } else if (input?.last != null) {
-        parsed.last = clamp(input.last);
-        parsed.first = 0;
-      }
-      break;
+    if (input?.cursor) {
+      after = decodePageCursor(input.cursor, "after");
     }
   }
 
-  parsed.sort = (input?.sort ?? []).map((field) => {
+  const sort: ParsedSortField[] = (input?.sort ?? []).map((field) => {
     const normalizedField = field.field.trim();
 
     if (!normalizedField) {
@@ -180,11 +156,28 @@ export function parsePageInput(
 
     return {
       field: normalizedField,
-      asc: field.asc,
+      order: field.order ?? "ASC",
     };
   });
 
-  return parsed;
+  const search: ParsedSearchInput | null = input?.search
+    ? {
+        query: input.search.query.trim(),
+        fields: input.search.fields ?? [],
+      }
+    : null;
+
+  const filter = parseFilterInput(input?.filter ?? null, supportedFilterFields ?? {});
+
+  return {
+    mode: mode as "CURSOR" | "OFFSET",
+    pageSize,
+    pageNumber,
+    after,
+    sort,
+    search,
+    filter,
+  };
 }
 
 export function parseFilterInput(
@@ -200,7 +193,10 @@ export function parseFilterInput(
       const field = filter.field.trim();
       const supportedOperators = supportedFields[field];
 
-      if (!supportedOperators) {
+      if (
+        Object.keys(supportedFields).length > 0 &&
+        !supportedOperators
+      ) {
         throw new AppError(
           `Unsupported filter field: ${field}.`,
           400,
@@ -208,7 +204,10 @@ export function parseFilterInput(
         );
       }
 
-      if (!supportedOperators.includes(filter.operator)) {
+      if (
+        supportedOperators &&
+        !supportedOperators.includes(filter.operator)
+      ) {
         throw new AppError(
           `Unsupported operator ${filter.operator} for ${field}.`,
           400,

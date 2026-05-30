@@ -5,84 +5,97 @@ import { describe, expect, it } from "vitest";
 import { encodeCursor } from "@/lib/cursor";
 import {
   parseFilterInput,
-  parsePageInput,
+  parsePaginationInput,
 } from "@/graphql/support/query-input";
 
 describe("query input helpers", () => {
   it("applies pagination defaults and size caps", () => {
-    expect(parsePageInput()).toEqual({
-      first: 10,
-      last: 0,
+    expect(parsePaginationInput()).toEqual({
+      mode: "CURSOR",
+      pageSize: 20,
+      pageNumber: 0,
       after: null,
-      before: null,
       sort: [],
+      search: null,
+      filter: { logic: "AND", filters: [] },
     });
 
-    expect(parsePageInput({ first: 999 })).toEqual({
-      first: 50,
-      last: 0,
+    expect(parsePaginationInput({ pageSize: 999 })).toEqual({
+      mode: "CURSOR",
+      pageSize: 100,
+      pageNumber: 0,
       after: null,
-      before: null,
       sort: [],
+      search: null,
+      filter: { logic: "AND", filters: [] },
     });
   });
 
-  it("parses forward pagination and sort input", () => {
+  it("parses cursor mode with after cursor", () => {
     expect(
-      parsePageInput(
+      parsePaginationInput(
         {
-          after: encodeCursor({
+          cursor: encodeCursor({
             id: "note-1",
             sortValues: ["2024-01-01T00:00:00.000Z"],
           }),
-          first: 5,
-          sort: [{ field: "createdAt", asc: false }],
+          pageSize: 5,
+          sort: [{ field: "createdAt", order: "DESC" }],
         },
         ["createdAt"]
       )
     ).toEqual({
-      first: 5,
-      last: 0,
+      mode: "CURSOR",
+      pageSize: 5,
+      pageNumber: 0,
       after: {
         id: "note-1",
         sortValues: ["2024-01-01T00:00:00.000Z"],
       },
-      before: null,
-      sort: [{ field: "createdAt", asc: false }],
+      sort: [{ field: "createdAt", order: "DESC" }],
+      search: null,
+      filter: { logic: "AND", filters: [] },
     });
   });
 
-  it("parses backward pagination input", () => {
+  it("parses offset mode with pageNumber", () => {
     expect(
-      parsePageInput({
-        before: encodeCursor({
-          id: "note-2",
-          sortValues: ["2024-01-02T00:00:00.000Z"],
-        }),
+      parsePaginationInput({
+        mode: "OFFSET",
+        pageSize: 10,
+        pageNumber: 2,
       })
     ).toEqual({
-      first: 0,
-      last: 10,
+      mode: "OFFSET",
+      pageSize: 10,
+      pageNumber: 2,
       after: null,
-      before: {
-        id: "note-2",
-        sortValues: ["2024-01-02T00:00:00.000Z"],
-      },
       sort: [],
+      search: null,
+      filter: { logic: "AND", filters: [] },
     });
   });
 
-  it("rejects mixed-direction pagination and invalid sort fields", () => {
+  it("rejects conflicting mode parameters", () => {
     expect(() =>
-      parsePageInput({
-        before: encodeCursor({ id: "note-2", sortValues: ["x"] }),
-        first: 1,
+      parsePaginationInput({
+        mode: "OFFSET",
+        cursor: encodeCursor({ id: "n", sortValues: ["x"] }),
       })
-    ).toThrow("last must be used with before, not first");
+    ).toThrow("cursor cannot be used with OFFSET mode");
 
     expect(() =>
-      parsePageInput(
-        { sort: [{ field: "ownerUsername", asc: true }] },
+      parsePaginationInput({
+        mode: "CURSOR",
+        pageNumber: 1,
+      })
+    ).toThrow("pageNumber cannot be used with CURSOR mode");
+  });
+
+  it("rejects invalid sort fields", () => {
+    expect(() =>
+      parsePaginationInput(
+        { sort: [{ field: "ownerUsername", order: "ASC" }] },
         ["title"]
       )
     ).toThrow("Unsupported sort field");
@@ -90,16 +103,19 @@ describe("query input helpers", () => {
 
   it("rejects invalid cursors", () => {
     expect(() =>
-      parsePageInput({ after: "bad-cursor" })
+      parsePaginationInput({ cursor: "bad-cursor" })
     ).toThrow("Invalid after cursor.");
   });
 
   it("rejects unsupported filters", () => {
     expect(() =>
-      parseFilterInput(
+      parsePaginationInput(
         {
-          filters: [{ field: "bogus", operator: "EQ", value: "x" }],
+          filter: {
+            filters: [{ field: "bogus", operator: "EQ", value: "x" }],
+          },
         },
+        undefined,
         { title: ["EQ", "CONTAINS"] }
       )
     ).toThrow("Unsupported filter field");
@@ -118,5 +134,24 @@ describe("query input helpers", () => {
       logic: "OR",
       filters: [{ field: "title", operator: "CONTAINS", value: "hi" }],
     });
+  });
+
+  it("parses search input", () => {
+    expect(
+      parsePaginationInput({
+        search: { query: "hello", fields: ["title"] },
+      })
+    ).toMatchObject({
+      search: { query: "hello", fields: ["title"] },
+    });
+  });
+
+  it("rejects negative pageNumber", () => {
+    expect(() =>
+      parsePaginationInput({
+        mode: "OFFSET",
+        pageNumber: -1,
+      })
+    ).toThrow("pageNumber must be non-negative");
   });
 });

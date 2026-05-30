@@ -107,116 +107,159 @@ describe("note service", () => {
     ).rejects.toThrow("Note not found");
   });
 
-  it("filters and paginates notes", async () => {
+  it("filters and paginates notes in cursor mode", async () => {
     await expect(
-      service.list(
-        "user@example.com",
-        { first: 1, last: 0, after: null, before: null, sort: [] },
-        {
+      service.list("user@example.com", {
+        mode: "CURSOR",
+        pageSize: 1,
+        pageNumber: 0,
+        after: null,
+        sort: [],
+        search: null,
+        filter: {
           logic: "AND",
           filters: [{ field: "title", operator: "CONTAINS", value: "Sec" }],
-        }
-      )
+        },
+      })
     ).resolves.toMatchObject({
       items: [{ id: "note-2" }],
-      pageInfo: {
-        startCursor: expect.any(String),
-        endCursor: expect.any(String),
-        hasNextPage: false,
-        hasPreviousPage: false,
+      pagination: {
+        next: null,
+        previous: null,
+        total: 1,
       },
     });
 
-    const firstPage = await service.list(
-      "user@example.com",
-      { first: 1, last: 0, after: null, before: null, sort: [] },
-      { logic: "AND", filters: [] }
-    );
+    const firstPage = await service.list("user@example.com", {
+      mode: "CURSOR",
+      pageSize: 1,
+      pageNumber: 0,
+      after: null,
+      sort: [],
+      search: null,
+      filter: { logic: "AND", filters: [] },
+    });
 
     await expect(
-      service.list(
-        "user@example.com",
-        {
-          first: 1,
-          last: 0,
-          after: {
-            id: "note-3",
-            sortValues: ["2024-01-03T00:00:00.000Z"],
-          },
-          before: null,
-          sort: [],
+      service.list("user@example.com", {
+        mode: "CURSOR",
+        pageSize: 1,
+        pageNumber: 0,
+        after: {
+          id: "note-3",
+          sortValues: ["2024-01-03T00:00:00.000Z"],
         },
-        { logic: "AND", filters: [] }
-      )
+        sort: [],
+        search: null,
+        filter: { logic: "AND", filters: [] },
+      })
     ).resolves.toMatchObject({
       items: [{ id: "note-2" }],
-      pageInfo: {
-        hasNextPage: true,
-        hasPreviousPage: true,
+      pagination: {
+        total: 3,
+        next: expect.objectContaining({ pageSize: 1, cursor: expect.any(String) }),
+        previous: expect.objectContaining({ pageSize: 1, cursor: expect.any(String) }),
       },
     });
 
     await expect(
-      service.list(
-        "user@example.com",
-        {
-          first: 1,
-          last: 0,
-          after: { id: "missing", sortValues: ["x"] },
-          before: null,
-          sort: [],
-        },
-        { logic: "AND", filters: [] }
-      )
+      service.list("user@example.com", {
+        mode: "CURSOR",
+        pageSize: 1,
+        pageNumber: 0,
+        after: { id: "missing", sortValues: ["x"] },
+        sort: [],
+        search: null,
+        filter: { logic: "AND", filters: [] },
+      })
     ).rejects.toThrow("Invalid pagination cursor");
 
-    await expect(
-      service.list(
-        "user@example.com",
-        {
-          first: 0,
-          last: 1,
-          after: null,
-          before: {
-            id: "note-2",
-            sortValues: ["2024-01-02T00:00:00.000Z"],
-          },
-          sort: [],
-        },
-        { logic: "AND", filters: [] }
-      )
-    ).resolves.toMatchObject({
-      items: [{ id: "note-3" }],
-      pageInfo: {
-        hasNextPage: true,
-        hasPreviousPage: false,
-      },
+    expect(firstPage.pagination.next).not.toBeNull();
+  });
+
+  it("supports cursor mode pagination after cursor", async () => {
+    const firstPage = await service.list("user@example.com", {
+      mode: "CURSOR",
+      pageSize: 1,
+      pageNumber: 0,
+      after: null,
+      sort: [],
+      search: null,
+      filter: { logic: "AND", filters: [] },
     });
 
-    expect(firstPage.pageInfo.startCursor).toBe(
-      encodeCursor({
-        id: "note-3",
-        sortValues: ["2024-01-03T00:00:00.000Z"],
-      })
-    );
+    expect(firstPage.items).toHaveLength(1);
+    expect(firstPage.pagination.total).toBe(3);
+    expect(firstPage.pagination.next).not.toBeNull();
+
+    const secondPage = await service.list("user@example.com", {
+      mode: "CURSOR",
+      pageSize: 1,
+      pageNumber: 0,
+      after: {
+        id: "note-2",
+        sortValues: ["2024-01-02T00:00:00.000Z"],
+      },
+      sort: [],
+      search: null,
+      filter: { logic: "AND", filters: [] },
+    });
+
+    expect(secondPage.items).toHaveLength(1);
+    expect(secondPage.items![0].id).toBe("note-1");
+    expect(secondPage.pagination.previous).not.toBeNull();
+    expect(secondPage.pagination.next).toBeNull();
+  });
+
+  it("supports offset mode pagination", async () => {
+    const firstPage = await service.list("user@example.com", {
+      mode: "OFFSET",
+      pageSize: 1,
+      pageNumber: 0,
+      after: null,
+      sort: [],
+      search: null,
+      filter: { logic: "AND", filters: [] },
+    });
+
+    expect(firstPage.items).toHaveLength(1);
+    expect(firstPage.items![0].id).toBe("note-3");
+    expect(firstPage.pagination.total).toBe(3);
+    expect(firstPage.pagination.next).toMatchObject({ pageSize: 1, pageNumber: 1 });
+    expect(firstPage.pagination.previous).toBeNull();
+
+    const secondPage = await service.list("user@example.com", {
+      mode: "OFFSET",
+      pageSize: 1,
+      pageNumber: 1,
+      after: null,
+      sort: [],
+      search: null,
+      filter: { logic: "AND", filters: [] },
+    });
+
+    expect(secondPage.items).toHaveLength(1);
+    expect(secondPage.items![0].id).toBe("note-2");
+    expect(secondPage.pagination.next).toMatchObject({ pageSize: 1, pageNumber: 2 });
+    expect(secondPage.pagination.previous).toMatchObject({ pageSize: 1, pageNumber: 0 });
   });
 
   it("supports explicit sort input", async () => {
-    await expect(
-      service.list(
-        "user@example.com",
-        {
-          first: 3,
-          last: 0,
-          after: null,
-          before: null,
-          sort: [{ field: "title", asc: true }],
-        },
-        { logic: "AND", filters: [] }
-      )
-    ).resolves.toMatchObject({
-      items: [{ title: "First" }, { title: "Second" }, { title: "Third" }],
+    const result = await service.list("user@example.com", {
+      mode: "CURSOR",
+      pageSize: 3,
+      pageNumber: 0,
+      after: null,
+      sort: [{ field: "title", order: "ASC" }],
+      search: null,
+      filter: { logic: "AND", filters: [] },
     });
+
+    expect(result.items.map((n) => n.title)).toEqual([
+      "First",
+      "Second",
+      "Third",
+    ]);
   });
 
   it("uses the active sort direction for tie-breaking", async () => {
@@ -241,36 +284,64 @@ describe("note service", () => {
       ])
     );
 
-    await expect(
-      tieService.list(
-        "user@example.com",
-        {
-          first: 2,
-          last: 0,
-          after: null,
-          before: null,
-          sort: [{ field: "createdAt", asc: false }],
-        },
-        { logic: "AND", filters: [] }
-      )
-    ).resolves.toMatchObject({
-      items: [{ id: "note-b" }, { id: "note-a" }],
+    const descResult = await tieService.list("user@example.com", {
+      mode: "CURSOR",
+      pageSize: 2,
+      pageNumber: 0,
+      after: null,
+      sort: [{ field: "createdAt", order: "DESC" }],
+      search: null,
+      filter: { logic: "AND", filters: [] },
     });
 
-    await expect(
-      tieService.list(
-        "user@example.com",
-        {
-          first: 2,
-          last: 0,
-          after: null,
-          before: null,
-          sort: [{ field: "createdAt", asc: true }],
-        },
-        { logic: "AND", filters: [] }
-      )
-    ).resolves.toMatchObject({
-      items: [{ id: "note-a" }, { id: "note-b" }],
+    expect(descResult.items.map((n) => n.id)).toEqual(["note-b", "note-a"]);
+
+    const ascResult = await tieService.list("user@example.com", {
+      mode: "CURSOR",
+      pageSize: 2,
+      pageNumber: 0,
+      after: null,
+      sort: [{ field: "createdAt", order: "ASC" }],
+      search: null,
+      filter: { logic: "AND", filters: [] },
+    });
+
+    expect(ascResult.items.map((n) => n.id)).toEqual(["note-a", "note-b"]);
+  });
+
+  it("supports search filtering", async () => {
+    const result = await service.list("user@example.com", {
+      mode: "CURSOR",
+      pageSize: 10,
+      pageNumber: 0,
+      after: null,
+      sort: [{ field: "title", order: "ASC" }],
+      search: { query: "hello", fields: [] },
+      filter: { logic: "AND", filters: [] },
+    });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items![0].id).toBe("note-1");
+    expect(result.pagination.total).toBe(1);
+  });
+
+  it("encodes cursors in cursor mode response", async () => {
+    const result = await service.list("user@example.com", {
+      mode: "CURSOR",
+      pageSize: 1,
+      pageNumber: 0,
+      after: null,
+      sort: [],
+      search: null,
+      filter: { logic: "AND", filters: [] },
+    });
+
+    expect(result.pagination.next).toMatchObject({
+      pageSize: 1,
+      cursor: encodeCursor({
+        id: "note-3",
+        sortValues: ["2024-01-03T00:00:00.000Z"],
+      }),
     });
   });
 });

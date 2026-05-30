@@ -4,25 +4,62 @@ export type CursorPayload = {
 };
 
 export function encodeCursor(payload: CursorPayload) {
-  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const parts: Buffer[] = [];
+
+  const nVals = Buffer.alloc(1);
+  nVals.writeUInt8(payload.sortValues.length);
+  parts.push(nVals);
+
+  for (const value of payload.sortValues) {
+    const valBuf = Buffer.from(value, "utf8");
+    const lenBuf = Buffer.alloc(2);
+    lenBuf.writeUInt16BE(valBuf.length);
+    parts.push(lenBuf);
+    parts.push(valBuf);
+  }
+
+  const idBuf = Buffer.from(payload.id, "utf8");
+  const idLenBuf = Buffer.alloc(2);
+  idLenBuf.writeUInt16BE(idBuf.length);
+  parts.push(idLenBuf);
+  parts.push(idBuf);
+
+  return Buffer.concat(parts).toString("base64url").replace(/=+$/, "");
 }
 
 export function decodeCursor(cursor: string): CursorPayload {
-  const parsed = JSON.parse(
-    Buffer.from(cursor, "base64url").toString("utf8")
-  ) as Partial<CursorPayload>;
+  const data = Buffer.from(cursor, "base64url");
+  let offset = 0;
 
-  if (
-    !parsed ||
-    typeof parsed.id !== "string" ||
-    !Array.isArray(parsed.sortValues) ||
-    !parsed.sortValues.every((value) => typeof value === "string")
-  ) {
+  if (offset >= data.length) {
     throw new Error("Invalid cursor");
   }
+  const nVals = data.readUInt8(offset);
+  offset += 1;
 
-  return {
-    id: parsed.id,
-    sortValues: parsed.sortValues,
-  };
+  const sortValues: string[] = [];
+  for (let i = 0; i < nVals; i++) {
+    if (offset + 2 > data.length) {
+      throw new Error("Invalid cursor");
+    }
+    const len = data.readUInt16BE(offset);
+    offset += 2;
+    if (offset + len > data.length) {
+      throw new Error("Invalid cursor");
+    }
+    sortValues.push(data.toString("utf8", offset, offset + len));
+    offset += len;
+  }
+
+  if (offset + 2 > data.length) {
+    throw new Error("Invalid cursor");
+  }
+  const idLen = data.readUInt16BE(offset);
+  offset += 2;
+  if (offset + idLen > data.length) {
+    throw new Error("Invalid cursor");
+  }
+  const id = data.toString("utf8", offset, offset + idLen);
+
+  return { id, sortValues };
 }

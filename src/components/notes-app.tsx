@@ -24,7 +24,6 @@ import { toast } from "sonner";
 import {
   CreateNoteDocument,
   DeleteNoteDocument,
-  type FilterInput,
   LoginDocument,
   type LoginMutation,
   type LoginMutationVariables,
@@ -129,6 +128,7 @@ export function NotesApp() {
   const client = useMemo(() => createClient(token), [token]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setToken(window.localStorage.getItem(tokenStorageKey));
   }, []);
 
@@ -162,7 +162,7 @@ export function NotesWorkspace({
   const me = useQuery<MeQuery, MeQueryVariables>(MeDocument, { skip: !token });
   const notes = useQuery<NotesQuery, NotesQueryVariables>(NotesDocument, {
     skip: !token,
-    variables: { input: { first: pageSize } },
+    variables: { input: { pageSize } },
     notifyOnNetworkStatusChange: true,
   });
   const [createNote, createState] = useMutation<
@@ -229,16 +229,16 @@ export function NotesWorkspace({
     }
   }
 
-  const pageInfo = notes.data?.notes.pageInfo;
+  const pagination = notes.data?.notes.pagination;
   const noteList = notes.data?.notes.items ?? [];
   const username = me.data?.me.username;
 
   return (
     <main className="min-h-screen bg-muted/30">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        <header className="flex flex-col gap-4 rounded-lg border bg-background p-4 sm:flex-row sm:items-center sm:justify-between">
+        <header className="flex flex-col gap-4 rounded-xl border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold tracking-normal">
+            <h1 className="text-2xl font-semibold tracking-tight text-primary">
               GraphQL Notes
             </h1>
             <p className="text-sm text-muted-foreground">
@@ -299,15 +299,17 @@ export function NotesWorkspace({
                   {noteList.length} loaded
                 </p>
                 <Button
-                  disabled={!pageInfo?.hasNextPage || notes.loading}
+                  disabled={!pagination?.next || notes.loading}
                   onClick={() =>
                     notes.fetchMore({
                       variables: {
                         input: {
-                          first: pageSize,
-                          after: pageInfo?.endCursor,
+                          pageSize,
+                          cursor:
+                            pagination?.next && "cursor" in pagination.next
+                              ? pagination.next.cursor
+                              : undefined,
                         },
-                        filter: null as FilterInput | null,
                       },
                       updateQuery: (previous, { fetchMoreResult }) => {
                         if (!fetchMoreResult) {
@@ -334,9 +336,9 @@ export function NotesWorkspace({
             </Card>
           </div>
         ) : (
-          <Empty className="min-h-[420px] border bg-background">
+          <Empty className="min-h-[420px] border bg-card">
             <EmptyHeader>
-              <EmptyMedia variant="icon">
+              <EmptyMedia variant="icon" className="text-primary bg-primary/10">
                 <BookOpenIcon />
               </EmptyMedia>
               <EmptyTitle>Login to manage notes</EmptyTitle>
@@ -518,7 +520,7 @@ function NoteList({
     return (
       <Empty className="min-h-[260px]">
         <EmptyHeader>
-          <EmptyMedia variant="icon">
+          <EmptyMedia variant="icon" className="text-primary bg-primary/10">
             <BookOpenIcon />
           </EmptyMedia>
           <EmptyTitle>No notes yet</EmptyTitle>
@@ -532,7 +534,7 @@ function NoteList({
     <div className="flex flex-col gap-3">
       {notes.map((note) => (
         <article
-          className="flex flex-col gap-3 rounded-lg border bg-background p-4"
+          className="flex flex-col gap-4 rounded-xl border bg-card p-4"
           key={note.id}
         >
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">

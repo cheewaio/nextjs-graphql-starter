@@ -11,4 +11,17 @@ export const resolvers = {
     ...authResolvers.Mutation,
     ...noteResolvers.Mutation,
   },
+  PaginationPage: {
+    __resolveType(obj: { cursor?: string; pageNumber?: number }) {
+      if ("cursor" in obj) {
+        return "CursorPage";
+      }
+
+      if ("pageNumber" in obj) {
+        return "OffsetPage";
+      }
+
+      return null;
+    },
+  },
 };

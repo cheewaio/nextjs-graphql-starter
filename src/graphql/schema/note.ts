@@ -19,7 +19,7 @@ export const noteTypeDefs = `#graphql
 
   type NoteConnection {
     items: [Note!]!
-    pageInfo: PageInfo!
+    pagination: PaginationMetadata!
   }
 
   type NoteResponse implements MutationResponse {
@@ -37,7 +37,7 @@ export const noteTypeDefs = `#graphql
 
   extend type Query {
     note(id: ID!): Note
-    notes(input: PageInput, filter: FilterInput): NoteConnection!
+    notes(input: PaginationInput): NoteConnection!
   }
 
   extend type Mutation {

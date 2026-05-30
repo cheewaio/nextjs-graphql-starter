@@ -5,8 +5,8 @@ query Me {
   }
 }
 
-query Notes($input: PageInput, $filter: FilterInput) {
-  notes(input: $input, filter: $filter) {
+query Notes($input: PaginationInput) {
+  notes(input: $input) {
     items {
       id
       title
@@ -14,11 +14,26 @@ query Notes($input: PageInput, $filter: FilterInput) {
       createdAt
       updatedAt
     }
-    pageInfo {
-      startCursor
-      endCursor
-      hasNextPage
-      hasPreviousPage
+    pagination {
+      next {
+        pageSize
+        ... on CursorPage {
+          cursor
+        }
+        ... on OffsetPage {
+          pageNumber
+        }
+      }
+      previous {
+        pageSize
+        ... on CursorPage {
+          cursor
+        }
+        ... on OffsetPage {
+          pageNumber
+        }
+      }
+      total
     }
   }
 }

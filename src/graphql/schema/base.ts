@@ -4,24 +4,54 @@ export const baseTypeDefs = `#graphql
   type Query
   type Mutation
 
+  enum SortOrder {
+    ASC
+    DESC
+  }
+
   input SortField {
     field: String!
-    asc: Boolean!
+    order: SortOrder! = ASC
   }
 
-  input PageInput {
-    first: Int
-    after: String
-    last: Int
-    before: String
+  enum PaginationMode {
+    CURSOR
+    OFFSET
+  }
+
+  input SearchInput {
+    query: String!
+    fields: [String!]
+  }
+
+  input PaginationInput {
+    mode: PaginationMode = CURSOR
+    pageSize: Int = 20
+    pageNumber: Int
+    cursor: String
+    search: SearchInput
     sort: [SortField!]
+    filter: FilterInput
   }
 
-  type PageInfo {
-    startCursor: String
-    endCursor: String
-    hasNextPage: Boolean!
-    hasPreviousPage: Boolean!
+  interface PaginationPage {
+    pageSize: Int!
+  }
+
+  type OffsetPage implements PaginationPage {
+    pageSize: Int!
+    pageNumber: Int!
+  }
+
+  type CursorPage implements PaginationPage {
+    pageSize: Int!
+    cursor: String!
+  }
+
+  type PaginationMetadata {
+    next: PaginationPage
+    previous: PaginationPage
+    total: Int!
   }
 
   enum FilterOperator {

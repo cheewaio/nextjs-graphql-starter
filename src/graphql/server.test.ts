@@ -109,12 +109,9 @@ describe("graphql server", () => {
     const listResult = await server.executeOperation(
       {
         query:
-          "query($input:PageInput,$filter:FilterInput){ notes(input:$input, filter:$filter){ items { id title } pageInfo { startCursor endCursor hasNextPage hasPreviousPage } } }",
+          "query($input:PaginationInput){ notes(input:$input){ items { id title } pagination { next { pageSize ... on CursorPage { cursor } } previous { pageSize ... on CursorPage { cursor } } total } } }",
         variables: {
-          input: { first: 5 },
-          filter: {
-            filters: [{ field: "title", operator: "CONTAINS", value: "First" }],
-          },
+          input: { pageSize: 5, filter: { filters: [{ field: "title", operator: "CONTAINS", value: "First" }] } },
         },
       },
       { contextValue }
@@ -128,11 +125,10 @@ describe("graphql server", () => {
     expect(listResult.body.singleResult.data).toMatchObject({
       notes: {
         items: [{ id: noteId, title: "First note" }],
-        pageInfo: {
-          startCursor: expect.any(String),
-          endCursor: expect.any(String),
-          hasNextPage: false,
-          hasPreviousPage: false,
+        pagination: {
+          next: null,
+          previous: null,
+          total: 1,
         },
       },
     });
@@ -160,7 +156,7 @@ describe("graphql server", () => {
     });
   });
 
-  it("supports bidirectional pagination", async () => {
+  it("supports cursor mode pagination", async () => {
     const auth = await login("user@example.com");
     const contextValue = await createGraphQLContext(
       `Bearer ${auth.accessToken}`
@@ -184,8 +180,13 @@ describe("graphql server", () => {
     const firstPage = await server.executeOperation(
       {
         query:
-          "query($input:PageInput){ notes(input:$input){ items { title } pageInfo { startCursor endCursor hasNextPage hasPreviousPage } } }",
-        variables: { input: { first: 2, sort: [{ field: "title", asc: true }] } },
+          "query($input:PaginationInput){ notes(input:$input){ items { title } pagination { next { pageSize ... on CursorPage { cursor } } previous { pageSize ... on CursorPage { cursor } } total } } }",
+        variables: {
+          input: {
+            pageSize: 2,
+            sort: [{ field: "title", order: "ASC" }],
+          },
+        },
       },
       { contextValue }
     );
@@ -197,9 +198,8 @@ describe("graphql server", () => {
 
     const firstPageData = firstPage.body.singleResult.data as {
       notes: {
-        pageInfo: {
-          endCursor: string | null;
-          startCursor: string | null;
+        pagination: {
+          next: { cursor: string } | null;
         };
       };
     };
@@ -207,25 +207,24 @@ describe("graphql server", () => {
     expect(firstPage.body.singleResult.data).toMatchObject({
       notes: {
         items: [{ title: "First note" }, { title: "Second note" }],
-        pageInfo: {
-          hasNextPage: true,
-          hasPreviousPage: false,
+        pagination: {
+          total: 3,
+          previous: null,
         },
       },
     });
 
-    const endCursor = firstPageData.notes.pageInfo.endCursor;
-    const startCursor = firstPageData.notes.pageInfo.startCursor;
+    expect(firstPageData.notes.pagination.next).not.toBeNull();
 
     const nextPage = await server.executeOperation(
       {
         query:
-          "query($input:PageInput){ notes(input:$input){ items { title } pageInfo { hasNextPage hasPreviousPage } } }",
+          "query($input:PaginationInput){ notes(input:$input){ items { title } pagination { next { pageSize ... on CursorPage { cursor } } previous { pageSize ... on CursorPage { cursor } } total } } }",
         variables: {
           input: {
-            first: 1,
-            after: endCursor,
-            sort: [{ field: "title", asc: true }],
+            pageSize: 1,
+            cursor: (firstPageData.notes.pagination.next as { cursor: string }).cursor,
+            sort: [{ field: "title", order: "ASC" }],
           },
         },
       },
@@ -240,39 +239,95 @@ describe("graphql server", () => {
     expect(nextPage.body.singleResult.data).toMatchObject({
       notes: {
         items: [{ title: "Third note" }],
-        pageInfo: {
-          hasNextPage: false,
-          hasPreviousPage: true,
+        pagination: {
+          next: null,
+          total: 3,
         },
       },
     });
+  });
 
-    const previousPage = await server.executeOperation(
+  it("supports offset mode pagination", async () => {
+    const auth = await login("user@example.com");
+    const contextValue = await createGraphQLContext(
+      `Bearer ${auth.accessToken}`
+    );
+
+    for (const input of [
+      { title: "Alpha", content: "X" },
+      { title: "Beta", content: "Y" },
+      { title: "Gamma", content: "Z" },
+    ]) {
+      await server.executeOperation(
+        {
+          query:
+            "mutation($input:CreateNoteInput!){ createNote(input:$input){ success } }",
+          variables: { input },
+        },
+        { contextValue }
+      );
+    }
+
+    const firstPage = await server.executeOperation(
       {
         query:
-          "query($input:PageInput){ notes(input:$input){ items { title } pageInfo { hasNextPage hasPreviousPage } } }",
+          "query($input:PaginationInput){ notes(input:$input){ items { title } pagination { next { pageSize ... on OffsetPage { pageNumber } } previous { pageSize ... on OffsetPage { pageNumber } } total } } }",
         variables: {
           input: {
-            last: 1,
-            before: startCursor,
-            sort: [{ field: "title", asc: true }],
+            mode: "OFFSET",
+            pageSize: 2,
+            pageNumber: 0,
+            sort: [{ field: "title", order: "ASC" }],
           },
         },
       },
       { contextValue }
     );
 
-    expect(previousPage.body.kind).toBe("single");
-    if (previousPage.body.kind !== "single") {
+    expect(firstPage.body.kind).toBe("single");
+    if (firstPage.body.kind !== "single") {
       return;
     }
 
-    expect(previousPage.body.singleResult.data).toMatchObject({
+    expect(firstPage.body.singleResult.data).toMatchObject({
       notes: {
-        items: [],
-        pageInfo: {
-          hasNextPage: true,
-          hasPreviousPage: false,
+        items: [{ title: "Alpha" }, { title: "Beta" }],
+        pagination: {
+          next: { pageNumber: 1 },
+          previous: null,
+          total: 3,
+        },
+      },
+    });
+
+    const secondPage = await server.executeOperation(
+      {
+        query:
+          "query($input:PaginationInput){ notes(input:$input){ items { title } pagination { next { pageSize ... on OffsetPage { pageNumber } } previous { pageSize ... on OffsetPage { pageNumber } } total } } }",
+        variables: {
+          input: {
+            mode: "OFFSET",
+            pageSize: 2,
+            pageNumber: 1,
+            sort: [{ field: "title", order: "ASC" }],
+          },
+        },
+      },
+      { contextValue }
+    );
+
+    expect(secondPage.body.kind).toBe("single");
+    if (secondPage.body.kind !== "single") {
+      return;
+    }
+
+    expect(secondPage.body.singleResult.data).toMatchObject({
+      notes: {
+        items: [{ title: "Gamma" }],
+        pagination: {
+          next: null,
+          previous: { pageNumber: 0 },
+          total: 3,
         },
       },
     });

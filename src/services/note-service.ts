@@ -1,9 +1,10 @@
 import { type PrismaClient } from "@/generated/prisma/client";
 import {
   type ParsedFilterInput,
-  type ParsedPageInput,
+  type ParsedPaginationInput,
   type ParsedSortField,
   type FilterOperator,
+  type ParsedSearchInput,
 } from "@/graphql/support/query-input";
 import { encodeCursor, type CursorPayload } from "@/lib/cursor";
 import { AppError } from "@/lib/errors";
@@ -33,7 +34,28 @@ export type NoteRepository = {
   delete(id: string): Promise<void>;
 };
 
-const defaultSort: ParsedSortField[] = [{ field: "createdAt", asc: false }];
+export type CursorPageResult = {
+  pageSize: number;
+  cursor: string;
+};
+
+export type OffsetPageResult = {
+  pageSize: number;
+  pageNumber: number;
+};
+
+export type PaginationMetadataResult = {
+  next: CursorPageResult | OffsetPageResult | null;
+  previous: CursorPageResult | OffsetPageResult | null;
+  total: number;
+};
+
+export type NoteConnectionResult = {
+  items: NoteRecord[];
+  pagination: PaginationMetadataResult;
+};
+
+const defaultSort: ParsedSortField[] = [{ field: "createdAt", order: "DESC" }];
 
 const fieldAliases: Record<string, keyof NoteRecord> = {
   id: "id",
@@ -148,7 +170,7 @@ function compareNotes(
   sort: ParsedSortField[]
 ) {
   for (const field of sort) {
-    const direction = field.asc ? 1 : -1;
+    const direction = field.order === "ASC" ? 1 : -1;
     const result = compareValues(
       sortValue(left, field.field),
       sortValue(right, field.field)
@@ -159,7 +181,7 @@ function compareNotes(
     }
   }
 
-  const tieBreakerDirection = sort.at(-1)?.asc ? 1 : -1;
+  const tieBreakerDirection = sort.at(-1)?.order === "ASC" ? 1 : -1;
   return left.id.localeCompare(right.id) * tieBreakerDirection;
 }
 
@@ -195,6 +217,16 @@ function filterFieldValue(note: NoteRecord, field: string) {
   }
 
   return typeof value === "string" ? value : null;
+}
+
+function applySearch(note: NoteRecord, search: ParsedSearchInput) {
+  const query = search.query.toLowerCase();
+  const fields = search.fields.length > 0 ? search.fields : ["title", "content"];
+
+  return fields.some((field) => {
+    const value = filterFieldValue(note, field);
+    return value?.toLowerCase().includes(query) ?? false;
+  });
 }
 
 function sanitizeCreateInput(input: { title: string; content: string }) {
@@ -314,18 +346,20 @@ export class NoteService {
 
   async list(
     ownerUsername: string,
-    page: ParsedPageInput,
-    filter: NoteFilterInput
-  ) {
+    page: ParsedPaginationInput
+  ): Promise<NoteConnectionResult> {
     const sort = page.sort.length > 0 ? page.sort : defaultSort;
     const notes = await this.repository.listByOwner(ownerUsername);
-    const filtered = notes
-      .filter((note) => {
-        if (filter.filters.length === 0) {
-          return true;
-        }
 
-        const matches = filter.filters.map((item) =>
+    let filtered = notes;
+
+    if (page.search) {
+      filtered = filtered.filter((note) => applySearch(note, page.search!));
+    }
+
+    if (page.filter.filters.length > 0) {
+      filtered = filtered.filter((note) => {
+        const matches = page.filter.filters.map((item) =>
           applyOperator(
             filterFieldValue(note, item.field),
             item.operator,
@@ -333,24 +367,42 @@ export class NoteService {
           )
         );
 
-        return filter.logic === "AND"
+        return page.filter.logic === "AND"
           ? matches.every(Boolean)
           : matches.some(Boolean);
-      })
-      .sort((left, right) => compareNotes(left, right, sort));
+      });
+    }
+
+    filtered.sort((left, right) => compareNotes(left, right, sort));
+
+    const total = filtered.length;
+
+    if (page.mode === "OFFSET") {
+      const startIndex = page.pageNumber * page.pageSize;
+      const endIndex = Math.min(total, startIndex + page.pageSize);
+      const items = filtered.slice(startIndex, endIndex);
+
+      const hasNext = endIndex < total;
+      const hasPrev = page.pageNumber > 0;
+
+      return {
+        items,
+        pagination: {
+          next: hasNext
+            ? { pageSize: page.pageSize, pageNumber: page.pageNumber + 1 }
+            : null,
+          previous: hasPrev
+            ? { pageSize: page.pageSize, pageNumber: page.pageNumber - 1 }
+            : null,
+          total,
+        },
+      };
+    }
 
     let startIndex = 0;
-    let endIndex = filtered.length;
+    let endIndex = total;
 
-    if (page.before) {
-      endIndex = findCursorIndex(filtered, page.before, sort);
-
-      if (endIndex < 0) {
-        throw new AppError("Invalid pagination cursor.", 400, "BAD_USER_INPUT");
-      }
-
-      startIndex = Math.max(0, endIndex - page.last);
-    } else if (page.after) {
+    if (page.after) {
       const index = findCursorIndex(filtered, page.after, sort);
 
       if (index < 0) {
@@ -358,24 +410,29 @@ export class NoteService {
       }
 
       startIndex = index + 1;
-      endIndex = Math.min(filtered.length, startIndex + page.first);
-    } else if (page.last > 0) {
-      startIndex = Math.max(0, filtered.length - page.last);
+      endIndex = Math.min(total, startIndex + page.pageSize);
     } else {
-      endIndex = Math.min(filtered.length, page.first);
+      endIndex = Math.min(total, page.pageSize);
     }
 
     const items = filtered.slice(startIndex, endIndex);
 
     return {
       items,
-      pageInfo: {
-        startCursor: items[0] ? encodeCursor(buildCursorPayload(items[0], sort)) : null,
-        endCursor: items.at(-1)
-          ? encodeCursor(buildCursorPayload(items.at(-1)!, sort))
+      pagination: {
+        next: endIndex < total
+          ? {
+              pageSize: page.pageSize,
+              cursor: encodeCursor(buildCursorPayload(items.at(-1)!, sort)),
+            }
           : null,
-        hasNextPage: endIndex < filtered.length,
-        hasPreviousPage: startIndex > 0,
+        previous: startIndex > 0
+          ? {
+              pageSize: page.pageSize,
+              cursor: encodeCursor(buildCursorPayload(items[0], sort)),
+            }
+          : null,
+        total,
       },
     };
   }
